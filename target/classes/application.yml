@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: distributed-lottery-system
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/lottery
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+
+# Custom JWT configuration
+app:
+  jwt:
+    secret: dGhpc2lzYW5leHRyZW1lbHlzZWN1cmVzcmluZ2Jvb3Rqd3RzaGFyZWRzZWNyZXRrZXlmb3Jsb3R0ZXJ5c3lzdGVt
+    expiration-ms: 3600000 # 1 hour
+    logout-prefix: "logout:"
+    rate-limit:
+      limit: 3
+      duration-seconds: 60

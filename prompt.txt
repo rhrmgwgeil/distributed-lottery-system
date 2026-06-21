@@ -1,0 +1,72 @@
+# 專案目標
+請幫我從零建立一個「高併發電商轉盤抽獎系統 distributed-lottery-system 」的後端專案。架構需符合高可用、防止超賣、分散式事務一致性，並包含基於 Spring Security 的權限系統、JPA 自動稽核機制，且嚴格遵守 SOLID 原則與設計模式，所有的註解或專案裡用的Static String 都幫我使用英文不要使用中文。
+
+# 技術棧 (Tech Stack)
+- Java 21
+- Spring Boot 3.3.x (或 3.x.x 最新穩定版)
+- Build Tool: Maven
+- Database: MySQL 8 (使用 Spring Data JPA)
+- Cache: Redis (使用 Spring Data Redis 的 StringRedisTemplate)
+- Message Queue: RabbitMQ (使用 Spring AMQP)
+- Security: Spring Security, JJWT (Java JWT)
+- API 文件: SpringDoc OpenAPI (Swagger 3.0)
+- 其他: Bcrypt, Lombok, Spring Boot Validation, JUnit 5, Mockito
+
+# 核心配置與共用模組 (Configuration & Shared)
+## 1. JPA 自動稽核機制 (JPA Auditing)
+- 建立 `BaseEntity` 類別 (加上 `@MappedSuperclass` 與 `@EntityListeners(AuditingEntityListener.class)`)，包含四個自動維護欄位：`created_by` (String), `created_at` (LocalDateTime), `updated_by` (String), `updated_at` (LocalDateTime)。
+- 實作 `AuditorAware<String>`：從 `SecurityContextHolder` 提取當前 JWT username。若 SecurityContext 為空，預設回傳 `"system"`。
+
+## 2. API 文件生成 (OpenAPI 3.0)
+- 所有 Controller 需加上 `@Tag`，所有 API 端點需加上 `@Operation` 說明用途與回傳 HTTP Status (包含 202 異步處理)。
+- Entity / DTO 需加上 `@Schema` 說明欄位用途。
+
+# 資料庫設計 (JPA Entities)
+建立以下 Entity (需繼承 `BaseEntity` 並使用 Lombok)：
+1. `User`: id, username(唯一), password, scope, is_password_changed(預設 false)
+2. `Activity`: id, name, status, max_draws_per_user, start_time, end_time
+3. `Prize`: id, activity_id, name, stock, probability, prize_type(1:實體, 2:虛擬, 3:銘謝惠顧), version(@Version)
+4. `DrawTicket`: ticket_id(String/UUID), activity_id, user_id, status(0:INIT, 1:SUCCESS, 2:FAILED), prize_id
+5. `UserActivityCounter`: id, user_id, activity_id, current_draw_count, version(@Version)
+
+# 程式碼設計與 SOLID 原則 (Design Patterns & Clean Code)
+請嚴格遵守單一職責與開閉原則，並套用以下設計模式解耦業務邏輯：
+1. **職責分離 (SRP)**: 拆分出 `DrawValidationService` (校驗次數與頻率)、`DrawAlgorithmService` (亂數機率運算)，由 `DrawAppService` (Facade) 統籌流程。
+2. **策略模式 (Strategy Pattern)**: 針對獎項類型建立 `PrizeProcessStrategy` 介面，並實作 `PhysicalPrizeStrategy` (實體獎需扣庫存與發 MQ)、`VirtualPrizeStrategy` (虛擬獎)、`NonePrizeStrategy` (銘謝惠顧，直接紀錄失敗狀態)。
+3. **工廠模式 (Factory Pattern)**: 實作 `PrizeStrategyFactory`，依據 `prize_type` 動態回傳對應的處理策略。
+
+# 核心架構與業務邏輯實作 (Core Logic)
+
+## 1. 系統初始化 (Data Seeder)
+- 實作 `CommandLineRunner`，若 `User` 表為空則建立預設帳號 (username:`admin`, password:`admin`, scope:`ADMIN`, is_password_changed:`false`)。
+
+## 2. 身份驗證與權限過濾 (Spring Security & JWT)
+- 設定 Stateless Session，開放 `/api/v1/auth/login` 與 Swagger UI 相關路徑。
+- `JwtAuthenticationFilter`: 解析 JWT scope 為 `GrantedAuthority`，並檢查 JWT 是否存在於 Redis 的 Logout Blocklist 中。
+
+## 3. 認證與使用者 API
+- `POST /login`: 驗證並核發 JWT。
+- `POST /logout`: 將當前 JWT 存入 Redis 阻擋名單 (TTL=JWT剩餘時間)。
+- `POST /change-password`: 登入後修改密碼，`is_password_changed` 設為 true。
+- CRUD User API (需 `SCOPE_ADMIN`): 執行前須檢查操作者 `is_password_changed` 是否為 true，否則拋出異常要求先改預設密碼。
+
+## 4. 抽獎 API 與防刷限流
+- `DrawController`: 包含 `POST /api/v1/draws` 與 `GET /api/v1/draws/{ticketId}/result`。
+- **Interceptor**: Redis 限制單一 `user_id` 每分鐘僅能呼叫抽獎 API 3 次。
+
+## 5. 核心抽獎流程 (結合 Design Patterns)
+`DrawAppService` 流程如下：
+- **Step 1**: 呼叫 `DrawValidationService` (利用 Redis INCR) 檢查參與次數。
+- **Step 2**: 呼叫 `DrawAlgorithmService` 產生亂數判定抽中哪個 `Prize`。
+- **Step 3**: 透過 `PrizeStrategyFactory` 取得該獎項的 `PrizeProcessStrategy`。
+- **Step 4**: 呼叫 `strategy.execute()`。若為實體獎，策略內部需執行 `StringRedisTemplate.opsForValue().decrement`，若 `< 0` 觸發降級改判為銘謝惠顧。
+
+## 6. 非同步落地與一致性 (MQ)
+- 若策略執行成功（如搶到實體庫存），發送訊息至 RabbitMQ。
+- Consumer 監聽 MQ，以 `@Transactional` 依序更新 `Prize`(扣真實庫存)、`UserActivityCounter`(加次數)、`DrawTicket`(改狀態為 SUCCESS)。
+- 實作 DLQ 與補償機制，失敗時執行 Redis 庫存 `INCR` 補回。
+
+# 測試要求 (JUnit 5 + Mockito)
+為核心服務撰寫單元測試：
+1. 機率分佈驗證 (`DrawAlgorithmService` 模擬萬次抽獎)。
+2. 邊界與降級驗證 (`PhysicalPrizeStrategy` 模擬 decrement 回傳 -1 時正確回傳未中獎結果)。
