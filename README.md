@@ -172,7 +172,9 @@ Below is the recommended workflow to initialize the database configurations and 
 
 *Please refer to the sequence diagram below for the core lottery draw execution flow (Redis Pre-deduction -> Transactional Outbox -> RabbitMQ -> DB Persistence).*
 
-<!-- TODO: Insert Sequence Diagram here -->
+![Draw Happy Path Sequence Diagram](https://github.com/rhrmgwgeil/distributed-lottery-system/blob/main/sequenceDiagram/Draw_Happy_Path.png?raw=true)
+
+![Cunsumer Happy Path Sequence Diagram](https://raw.githubusercontent.com/rhrmgwgeil/distributed-lottery-system/refs/heads/main/sequenceDiagram/Cunsumer_Happy_Path.png)
 
 ## 🗄️ Database Schema Description
 
