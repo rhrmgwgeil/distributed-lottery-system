@@ -1,0 +1,26 @@
+title Distributed Lottery System - MQ Asynchronous DB Persistence (Happy Path)
+
+participant RabbitMQ
+participant DrawMessageConsumer
+participant PostgreSQL
+
+RabbitMQ->DrawMessageConsumer: Deliver DrawMessage (ticketId, prizeId, userId, activityId)
+activate DrawMessageConsumer
+
+note over DrawMessageConsumer: Begin Database Transaction
+
+DrawMessageConsumer->PostgreSQL: Find DrawTicket & Prize
+PostgreSQL-->DrawMessageConsumer: entities
+
+alt If Physical Prize (prizeType = 1)
+    DrawMessageConsumer->PostgreSQL: Deduct database stock (stock - 1, check @Version)
+end
+
+DrawMessageConsumer->PostgreSQL: Increment UserActivityCounter (drawCount + 1, check @Version)
+DrawMessageConsumer->PostgreSQL: Update DrawTicket (status: SUCCESS)
+
+note over DrawMessageConsumer: Commit Transaction (JPA Optimistic Lock check)
+PostgreSQL-->DrawMessageConsumer: Commit Successful
+
+DrawMessageConsumer-->RabbitMQ: ACK Message (Acknowledge)
+deactivate DrawMessageConsumer
