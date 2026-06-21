@@ -1,39 +1,30 @@
 # 任務目標
-請幫我優化 `PhysicalPrizeStrategy.java` 的實作，並新增一個 `RedisOutboxScheduler.java`。
-目前的架構在扣減 Redis 庫存後、發送 RabbitMQ 之前，如果發生 Application Crash 會導致中獎訊息遺失（庫存扣了但沒發獎）。
-我們需要導入 **Redis-Native Transactional Outbox (事務管線化本地訊息表)** 模式來解決這個 Race Condition 與資料遺失風險。
+請幫我優化 `PrizeServiceImpl.java` 與 `ActivityServiceImpl.java`。
+目前系統在「新增/修改獎品」以及「修改活動」時，僅更新了 MySQL 資料庫，卻沒有同步更新 Redis 快取。這會導致營運人員在活動進行中動態調整時，前端抽獎演算法無法即時套用新規則，甚至發生沒有初始庫存的錯誤。
+我們需要導入 **Cache-Aside / Write-Through** 策略，並加上嚴格的機率加總防呆機制。
 
 # 具體修改要求
 
-## 1. 重構 `PhysicalPrizeStrategy.java`
-請修改 `execute` 方法，導入 Redis 的 `SessionCallback` 與事務 (`MULTI`/`EXEC`)。
-- **事務區塊**：在同一個 Redis 事務中執行以下兩個指令：
-  1. 扣減庫存：`opsForValue().decrement(stockKey)`
-  2. 寫入 Outbox：將 `DrawMessage` 序列化為 JSON 字串，並寫入 Redis 的 List 中：`opsForList().leftPush(outboxKey, messageJson)`
-  （註：`outboxKey` 命名規則建議為 `activity:{activityId}:outbox`）
-- **事務結果處理**：
-  - 若 `exec()` 回傳的 `remainingStock >= 0`（搶到庫存）：
-    - 呼叫 `rabbitTemplate.convertAndSend()` 發送訊息至 MQ。
-    - **發送成功後**：從 Redis outbox 中移除該訊息（例如使用 `opsForList().remove(outboxKey, 1, messageJson)`）。
-    - 回傳成功結果。
-  - 若 `remainingStock < 0`（庫存已空/超賣）：
-    - 執行補償：`opsForValue().increment(stockKey)` 補回庫存。
-    - 移除無效的 outbox 紀錄：從 outbox 移除剛才塞入的訊息。
-    - 回傳降級結果（銘謝惠顧）。
-  - 若發送 MQ 發生 Exception：捕獲異常並印出 Error Log，但不阻斷流程（回傳成功）。因為訊息已經安全留在 Redis Outbox 中，會由後續的 Scheduler 補發。
+## 1. 重構 `PrizeServiceImpl.java`
+請在 `createPrize` 與 `updatePrize` 方法中加入以下邏輯：
+- **機率防呆校驗 (`validateProbabilitySum`)**：
+  - 在寫入 DB 之前，必須撈出該 `activityId` 所有的現有獎品。
+  - 將所有現有獎品的 `probability` 與即將寫入的 `newProbability` 加總（若為 update，則需先排除當前修改目標的舊機率）。
+  - 若總和大於 100，拋出 `IllegalArgumentException`，拒絕操作。
+- **庫存與機率清單同步 (`syncPrizeToRedis`)**：
+  - 成功寫入 DB 後：
+    1. 若 `prizeType` 為 1 (實體) 或 2 (虛擬)，將其 `stock` 寫入 Redis (使用 `opsForValue().set("prize:{id}:stock", stock)`) 進行快取預熱/同步。
+    2. 撈出該活動「所有」最新的獎品清單，將其序列化為 JSON，並更新至 Redis (使用 `opsForValue().set("activity:{activityId}:prizes", prizesJson)`)，讓 `DrawAlgorithmService` 能即時拿到最新機率。
 
-## 2. 新增 `RedisOutboxScheduler.java` (排程轉發器)
-請在 `com.lottery.system.scheduler` (或相似 package) 下建立一個 Spring `@Component` 與 `@EnableScheduling` 的排程器。
-- **功能**：設定一個 `@Scheduled(fixedDelay = 10000)` (每 10 秒執行一次) 的任務。
-- **邏輯**：
-  1. 使用 `stringRedisTemplate.keys("activity:*:outbox")` 找出所有活動的 Outbox Key。
-  2. 遍歷這些 Key，使用 `opsForList().rightPop(outboxKey)` 取出積壓的訊息（代表 API 層發送 MQ 失敗的孤兒訊息）。
-  3. 將取出的 JSON 訊息反序列化為 `DrawMessage`。
-  4. 重新發送至 RabbitMQ。
-  5. 確保這段邏輯有完整的 `try-catch`，若 MQ 依然連線失敗，需將訊息重新 `leftPush` 放回佇列等待下次重試。
+## 2. 重構 `ActivityServiceImpl.java`
+請在 `createActivity` 與 `updateActivity` 方法中加入以下邏輯：
+- **使用者抽獎上限同步 (`syncActivityMaxDrawsToRedis`)**：
+  - 成功寫入 DB 後，將新的 `maxDrawsPerUser` 寫入 Redis (使用 `opsForValue().set("activity:{id}:max_draws", maxDraws)`)。
+  - 這樣一來，`DrawValidationService` 在執行 `INCR` 檢查時，才能即時依據這個新的 Redis Key 來攔截。
 
 ## 3. 依賴注入調整
-- 請確保 `PhysicalPrizeStrategy` 中有注入 `ObjectMapper` 以處理 JSON 的序列化與反序列化。
+- 確保 `PrizeServiceImpl` 中有注入 `ObjectMapper` (處理 JSON) 以及 `StringRedisTemplate`。
+- 確保 `ActivityServiceImpl` 中有注入 `StringRedisTemplate`。
 
 # 預期結果
-完成後，`PhysicalPrizeStrategy` 必須達到「扣庫存」與「記錄待發送訊息」的絕對原子性，徹底消除極端當機造成的資料不一致風險。
+完成後，管理員不論是新增獎品、修改中獎機率、或是調整每人抽獎次數上限，都會在寫入 DB 的同一個 Transaction 中完成 Redis 的即時刷新，保證高併發讀取時的一致性與防呆安全。

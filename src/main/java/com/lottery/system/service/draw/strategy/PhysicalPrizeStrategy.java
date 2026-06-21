@@ -35,7 +35,7 @@ public class PhysicalPrizeStrategy implements PrizeProcessStrategy {
 
     @Override
     public boolean execute(DrawTicket ticket, Prize prize) {
-        String stockKey = "prize:stock:" + prize.getId();
+        String stockKey = "prize:" + prize.getId() + ":stock";
         String outboxKey = "activity:" + ticket.getActivityId() + ":outbox";
 
         DrawMessage drawMessage = DrawMessage.builder()

@@ -1,5 +1,7 @@
 package com.lottery.system.service.draw;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lottery.system.entity.Activity;
 import com.lottery.system.entity.DrawTicket;
 import com.lottery.system.entity.Prize;
@@ -11,6 +13,9 @@ import com.lottery.system.repository.PrizeRepository;
 import com.lottery.system.repository.UserRepository;
 import com.lottery.system.service.draw.strategy.PrizeProcessStrategy;
 import com.lottery.system.service.draw.strategy.PrizeStrategyFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,6 +25,8 @@ import java.util.UUID;
 @Service
 public class DrawAppService {
 
+    private static final Logger log = LoggerFactory.getLogger(DrawAppService.class);
+
     private final UserRepository userRepository;
     private final ActivityRepository activityRepository;
     private final PrizeRepository prizeRepository;
@@ -28,6 +35,8 @@ public class DrawAppService {
     private final DrawAlgorithmService drawAlgorithmService;
     private final PrizeStrategyFactory strategyFactory;
     private final DrawMessageProducer messageProducer;
+    private final StringRedisTemplate redisTemplate;
+    private final ObjectMapper objectMapper;
 
     public DrawAppService(UserRepository userRepository,
                           ActivityRepository activityRepository,
@@ -36,7 +45,9 @@ public class DrawAppService {
                           DrawValidationService drawValidationService,
                           DrawAlgorithmService drawAlgorithmService,
                           PrizeStrategyFactory strategyFactory,
-                          DrawMessageProducer messageProducer) {
+                          DrawMessageProducer messageProducer,
+                          StringRedisTemplate redisTemplate,
+                          ObjectMapper objectMapper) {
         this.userRepository = userRepository;
         this.activityRepository = activityRepository;
         this.prizeRepository = prizeRepository;
@@ -45,10 +56,12 @@ public class DrawAppService {
         this.drawAlgorithmService = drawAlgorithmService;
         this.strategyFactory = strategyFactory;
         this.messageProducer = messageProducer;
+        this.redisTemplate = redisTemplate;
+        this.objectMapper = objectMapper;
     }
 
     /**
-     * Orchesrates the high-concurrency draw flow.
+     * Orchestrates the high-concurrency draw flow.
      * @param userId participating user ID
      * @param activityId target activity ID
      * @return the created DrawTicket
@@ -64,8 +77,8 @@ public class DrawAppService {
         // Step 1: Validate draw count using Redis INCR
         drawValidationService.validateDrawCount(userId, activity);
 
-        // Fetch all prizes for the activity
-        List<Prize> prizes = prizeRepository.findByActivityId(activityId);
+        // Fetch all prizes for the activity (using Cache-Aside)
+        List<Prize> prizes = getPrizesFromCacheOrDb(activityId);
         if (prizes.isEmpty()) {
             // Rollback Redis draw count counter since the activity configuration is invalid
             drawValidationService.rollbackDrawCount(userId, activityId);
@@ -116,5 +129,30 @@ public class DrawAppService {
         }
 
         return ticket;
+    }
+
+    private List<Prize> getPrizesFromCacheOrDb(Long activityId) {
+        String redisKey = "activity:" + activityId + ":prizes";
+        String cachedPrizes = redisTemplate.opsForValue().get(redisKey);
+
+        if (cachedPrizes != null) {
+            try {
+                return objectMapper.readValue(cachedPrizes, new TypeReference<List<Prize>>() {});
+            } catch (Exception e) {
+                log.error("Failed to deserialize cached prizes list for activity: {}", activityId, e);
+            }
+        }
+
+        // Cache miss: Load from database
+        List<Prize> dbPrizes = prizeRepository.findByActivityId(activityId);
+        if (!dbPrizes.isEmpty()) {
+            try {
+                String prizesJson = objectMapper.writeValueAsString(dbPrizes);
+                redisTemplate.opsForValue().set(redisKey, prizesJson);
+            } catch (Exception e) {
+                log.error("Failed to serialize and warm up prizes list to Redis for activity: {}", activityId, e);
+            }
+        }
+        return dbPrizes;
     }
 }

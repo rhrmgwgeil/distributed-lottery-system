@@ -111,7 +111,7 @@ public class PhysicalPrizeStrategyTest {
         verify(rabbitTemplate, never()).convertAndSend(anyString(), anyString(), any(Object.class));
 
         // Verify compensation: stock incremented back, and message removed from outbox
-        verify(valueOperations, times(1)).increment("prize:stock:100");
+        verify(valueOperations, times(1)).increment("prize:100:stock");
         verify(listOperations, times(1)).remove(eq("activity:10:outbox"), eq(1L), anyString());
     }
 }

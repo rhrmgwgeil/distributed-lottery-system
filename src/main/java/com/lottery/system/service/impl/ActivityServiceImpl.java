@@ -7,8 +7,10 @@ import com.lottery.system.entity.User;
 import com.lottery.system.repository.ActivityRepository;
 import com.lottery.system.repository.UserRepository;
 import com.lottery.system.service.ActivityService;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
@@ -16,13 +18,18 @@ public class ActivityServiceImpl implements ActivityService {
 
     private final ActivityRepository activityRepository;
     private final UserRepository userRepository;
+    private final StringRedisTemplate redisTemplate;
 
-    public ActivityServiceImpl(ActivityRepository activityRepository, UserRepository userRepository) {
+    public ActivityServiceImpl(ActivityRepository activityRepository,
+                               UserRepository userRepository,
+                               StringRedisTemplate redisTemplate) {
         this.activityRepository = activityRepository;
         this.userRepository = userRepository;
+        this.redisTemplate = redisTemplate;
     }
 
     @Override
+    @Transactional
     public ActivityResponseDto createActivity(String operatorUsername, ActivityRequestDto request) {
         verifyOperatorPasswordChanged(operatorUsername);
 
@@ -35,10 +42,16 @@ public class ActivityServiceImpl implements ActivityService {
                 .build();
 
         Activity saved = activityRepository.save(activity);
+
+        // Sync max draws count to Redis: activity:{id}:max_draws
+        String maxDrawsKey = "activity:" + saved.getId() + ":max_draws";
+        redisTemplate.opsForValue().set(maxDrawsKey, String.valueOf(saved.getMaxDrawsPerUser()));
+
         return mapToDto(saved);
     }
 
     @Override
+    @Transactional
     public ActivityResponseDto updateActivity(String operatorUsername, Long id, ActivityRequestDto request) {
         verifyOperatorPasswordChanged(operatorUsername);
 
@@ -52,6 +65,11 @@ public class ActivityServiceImpl implements ActivityService {
         activity.setEndTime(request.getEndTime());
 
         Activity saved = activityRepository.save(activity);
+
+        // Sync max draws count to Redis: activity:{id}:max_draws
+        String maxDrawsKey = "activity:" + saved.getId() + ":max_draws";
+        redisTemplate.opsForValue().set(maxDrawsKey, String.valueOf(saved.getMaxDrawsPerUser()));
+
         return mapToDto(saved);
     }
 

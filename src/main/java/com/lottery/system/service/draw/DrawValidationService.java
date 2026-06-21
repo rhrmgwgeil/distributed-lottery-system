@@ -39,7 +39,17 @@ public class DrawValidationService {
             redisTemplate.expire(redisKey, 1, TimeUnit.DAYS);
         }
 
-        if (count != null && count > activity.getMaxDrawsPerUser()) {
+        String maxDrawsKey = "activity:" + activity.getId() + ":max_draws";
+        String maxDrawsCached = redisTemplate.opsForValue().get(maxDrawsKey);
+        int maxDrawsLimit;
+        if (maxDrawsCached != null) {
+            maxDrawsLimit = Integer.parseInt(maxDrawsCached);
+        } else {
+            maxDrawsLimit = activity.getMaxDrawsPerUser();
+            redisTemplate.opsForValue().set(maxDrawsKey, String.valueOf(maxDrawsLimit));
+        }
+
+        if (count != null && count > maxDrawsLimit) {
             // Roll back the counter increment
             redisTemplate.opsForValue().decrement(redisKey);
             throw new IllegalStateException("User has exceeded the maximum draws allowed for this activity");
