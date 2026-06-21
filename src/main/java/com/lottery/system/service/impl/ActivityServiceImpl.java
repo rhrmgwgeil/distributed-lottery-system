@@ -33,6 +33,11 @@ public class ActivityServiceImpl implements ActivityService {
     public ActivityResponseDto createActivity(String operatorUsername, ActivityRequestDto request) {
         verifyOperatorPasswordChanged(operatorUsername);
 
+        if (request.getStartTime() != null && request.getEndTime() != null && 
+            request.getStartTime().isAfter(request.getEndTime())) {
+            throw new IllegalArgumentException("Activity start time cannot be after end time");
+        }
+
         Activity activity = Activity.builder()
                 .name(request.getName())
                 .status(request.getStatus())
@@ -54,6 +59,11 @@ public class ActivityServiceImpl implements ActivityService {
     @Transactional
     public ActivityResponseDto updateActivity(String operatorUsername, Long id, ActivityRequestDto request) {
         verifyOperatorPasswordChanged(operatorUsername);
+
+        if (request.getStartTime() != null && request.getEndTime() != null && 
+            request.getStartTime().isAfter(request.getEndTime())) {
+            throw new IllegalArgumentException("Activity start time cannot be after end time");
+        }
 
         Activity activity = activityRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Activity not found"));

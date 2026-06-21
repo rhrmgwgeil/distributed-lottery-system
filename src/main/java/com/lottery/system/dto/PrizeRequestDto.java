@@ -28,14 +28,12 @@ public class PrizeRequestDto {
     private Integer stock;
 
     @NotNull(message = "Probability must not be null")
-    @DecimalMin(value = "0.0000", message = "Probability must be at least 0.0000")
-    @DecimalMax(value = "1.0000", message = "Probability must be at most 1.0000")
-    @Schema(description = "Winning probability (0.0000 to 1.0000)", example = "0.0500", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Min(value = 1, message = "Probability must be at least 1")
+    @Max(value = 100, message = "Probability must be at most 100")
+    @Schema(description = "Winning probability percentage (1 to 100)", example = "5", requiredMode = Schema.RequiredMode.REQUIRED)
     private BigDecimal probability;
 
     @NotNull(message = "Prize type must not be null")
-    @Min(value = 1, message = "Prize type must be 1, 2, or 3")
-    @Max(value = 3, message = "Prize type must be 1, 2, or 3")
     @Schema(description = "Type of prize (1: Physical, 2: Virtual, 3: None)", example = "1", requiredMode = Schema.RequiredMode.REQUIRED)
     private Integer prizeType;
 }

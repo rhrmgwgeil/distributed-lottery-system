@@ -95,9 +95,9 @@ public class PrizeServiceImpl implements PrizeService {
             sum = sum.add(p.getProbability());
         }
 
-        if (sum.compareTo(BigDecimal.ONE) > 0) {
+        if (sum.compareTo(new BigDecimal("100")) > 0) {
             throw new IllegalArgumentException(
-                    "Total probability of prizes for activity " + activityId + " cannot exceed 1.0 (100%). Current sum is " + sum
+                    "Total probability of prizes for activity " + activityId + " cannot exceed 100. Current sum is " + sum
             );
         }
     }

@@ -1,30 +1,32 @@
 # 任務目標
-請幫我優化 `PrizeServiceImpl.java` 與 `ActivityServiceImpl.java`。
-目前系統在「新增/修改獎品」以及「修改活動」時，僅更新了 MySQL 資料庫，卻沒有同步更新 Redis 快取。這會導致營運人員在活動進行中動態調整時，前端抽獎演算法無法即時套用新規則，甚至發生沒有初始庫存的錯誤。
-我們需要導入 **Cache-Aside / Write-Through** 策略，並加上嚴格的機率加總防呆機制。
+請幫我為目前的專案全面加上「輸入驗證 (Input Validation)」與「全局錯誤處理 (Global Exception Handling)」機制。
+系統必須防範不合法的資料進入 Service 層，並提供對前端友善的標準化 JSON 錯誤格式。
 
 # 具體修改要求
 
-## 1. 重構 `PrizeServiceImpl.java`
-請在 `createPrize` 與 `updatePrize` 方法中加入以下邏輯：
-- **機率防呆校驗 (`validateProbabilitySum`)**：
-  - 在寫入 DB 之前，必須撈出該 `activityId` 所有的現有獎品。
-  - 將所有現有獎品的 `probability` 與即將寫入的 `newProbability` 加總（若為 update，則需先排除當前修改目標的舊機率）。
-  - 若總和大於 100，拋出 `IllegalArgumentException`，拒絕操作。
-- **庫存與機率清單同步 (`syncPrizeToRedis`)**：
-  - 成功寫入 DB 後：
-    1. 若 `prizeType` 為 1 (實體) 或 2 (虛擬)，將其 `stock` 寫入 Redis (使用 `opsForValue().set("prize:{id}:stock", stock)`) 進行快取預熱/同步。
-    2. 撈出該活動「所有」最新的獎品清單，將其序列化為 JSON，並更新至 Redis (使用 `opsForValue().set("activity:{activityId}:prizes", prizesJson)`)，讓 `DrawAlgorithmService` 能即時拿到最新機率。
+## 1. DTO 層級驗證 (JSR-380 Bean Validation)
+請在以下 DTO 加上對應的 validation 註解 (需 import `jakarta.validation.constraints.*`)：
+- `ActivityRequestDto`:
+  - `name`: `@NotBlank(message = "活動名稱不能為空")`
+  - `status`: `@NotNull(message = "活動狀態不能為空")`
+  - `maxDrawsPerUser`: `@NotNull`, `@Min(value = 1, message = "每人抽獎次數至少為 1")`
+  - `startTime`, `endTime`: `@NotNull`
+- `PrizeRequestDto`:
+  - `name`: `@NotBlank(message = "獎品名稱不能為空")`
+  - `stock`: `@NotNull`, `@Min(value = 0, message = "庫存不能為負數")`
+  - `probability`: `@NotNull`, `@Min(value = 1, message = "機率不能小於 1"), @Max(value = 100, message = "機率不能大於 100")`
+  - `prizeType`: `@NotNull`
+- `UserRequestDto` & `LoginRequest`:
+  - `username`: `@NotBlank(message = "帳號不能為空")`
+  - `password`: `@NotBlank(message = "密碼不能為空")`
 
-## 2. 重構 `ActivityServiceImpl.java`
-請在 `createActivity` 與 `updateActivity` 方法中加入以下邏輯：
-- **使用者抽獎上限同步 (`syncActivityMaxDrawsToRedis`)**：
-  - 成功寫入 DB 後，將新的 `maxDrawsPerUser` 寫入 Redis (使用 `opsForValue().set("activity:{id}:max_draws", maxDraws)`)。
-  - 這樣一來，`DrawValidationService` 在執行 `INCR` 檢查時，才能即時依據這個新的 Redis Key 來攔截。
+## 2. Controller 層啟動驗證
+請檢視 `ActivityController`, `PrizeController`, `UserController`, `AuthController`，確保所有接收 DTO 的 API 端點，其 `@RequestBody` 前面都有加上 `@Valid` 註解。
 
-## 3. 依賴注入調整
-- 確保 `PrizeServiceImpl` 中有注入 `ObjectMapper` (處理 JSON) 以及 `StringRedisTemplate`。
-- 確保 `ActivityServiceImpl` 中有注入 `StringRedisTemplate`。
-
-# 預期結果
-完成後，管理員不論是新增獎品、修改中獎機率、或是調整每人抽獎次數上限，都會在寫入 DB 的同一個 Transaction 中完成 Redis 的即時刷新，保證高併發讀取時的一致性與防呆安全。
+## 3. Service 層業務邏輯驗證 (Business Rule)
+- 在 `ActivityServiceImpl.java` 的 `createActivity` 與 `updateActivity` 方法最前面，加入時間邏輯校驗：
+  ```java
+  if (request.getStartTime() != null && request.getEndTime() != null && 
+      request.getStartTime().isAfter(request.getEndTime())) {
+      throw new IllegalArgumentException("活動開始時間不能晚於結束時間");
+  }
