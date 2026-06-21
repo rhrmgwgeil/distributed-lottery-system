@@ -109,8 +109,10 @@ public class DrawAppService {
             // Save the initialized ticket
             drawTicketRepository.save(ticket);
 
-            // Send message to RabbitMQ for asynchronous database updates
-            messageProducer.sendDrawMessage(ticketId, userId, activityId, ticket.getPrizeId());
+            // Only publish to MQ for virtual prizes here (Physical strategy handles its own MQ + outbox logic)
+            if (selectedPrize.getPrizeType() == 2) {
+                messageProducer.sendDrawMessage(ticketId, userId, activityId, ticket.getPrizeId());
+            }
         }
 
         return ticket;

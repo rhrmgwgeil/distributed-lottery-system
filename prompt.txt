@@ -1,72 +1,39 @@
-# 專案目標
-請幫我從零建立一個「高併發電商轉盤抽獎系統 distributed-lottery-system 」的後端專案。架構需符合高可用、防止超賣、分散式事務一致性，並包含基於 Spring Security 的權限系統、JPA 自動稽核機制，且嚴格遵守 SOLID 原則與設計模式，所有的註解或專案裡用的Static String 都幫我使用英文不要使用中文。
+# 任務目標
+請幫我優化 `PhysicalPrizeStrategy.java` 的實作，並新增一個 `RedisOutboxScheduler.java`。
+目前的架構在扣減 Redis 庫存後、發送 RabbitMQ 之前，如果發生 Application Crash 會導致中獎訊息遺失（庫存扣了但沒發獎）。
+我們需要導入 **Redis-Native Transactional Outbox (事務管線化本地訊息表)** 模式來解決這個 Race Condition 與資料遺失風險。
 
-# 技術棧 (Tech Stack)
-- Java 21
-- Spring Boot 3.3.x (或 3.x.x 最新穩定版)
-- Build Tool: Maven
-- Database: MySQL 8 (使用 Spring Data JPA)
-- Cache: Redis (使用 Spring Data Redis 的 StringRedisTemplate)
-- Message Queue: RabbitMQ (使用 Spring AMQP)
-- Security: Spring Security, JJWT (Java JWT)
-- API 文件: SpringDoc OpenAPI (Swagger 3.0)
-- 其他: Bcrypt, Lombok, Spring Boot Validation, JUnit 5, Mockito
+# 具體修改要求
 
-# 核心配置與共用模組 (Configuration & Shared)
-## 1. JPA 自動稽核機制 (JPA Auditing)
-- 建立 `BaseEntity` 類別 (加上 `@MappedSuperclass` 與 `@EntityListeners(AuditingEntityListener.class)`)，包含四個自動維護欄位：`created_by` (String), `created_at` (LocalDateTime), `updated_by` (String), `updated_at` (LocalDateTime)。
-- 實作 `AuditorAware<String>`：從 `SecurityContextHolder` 提取當前 JWT username。若 SecurityContext 為空，預設回傳 `"system"`。
+## 1. 重構 `PhysicalPrizeStrategy.java`
+請修改 `execute` 方法，導入 Redis 的 `SessionCallback` 與事務 (`MULTI`/`EXEC`)。
+- **事務區塊**：在同一個 Redis 事務中執行以下兩個指令：
+  1. 扣減庫存：`opsForValue().decrement(stockKey)`
+  2. 寫入 Outbox：將 `DrawMessage` 序列化為 JSON 字串，並寫入 Redis 的 List 中：`opsForList().leftPush(outboxKey, messageJson)`
+  （註：`outboxKey` 命名規則建議為 `activity:{activityId}:outbox`）
+- **事務結果處理**：
+  - 若 `exec()` 回傳的 `remainingStock >= 0`（搶到庫存）：
+    - 呼叫 `rabbitTemplate.convertAndSend()` 發送訊息至 MQ。
+    - **發送成功後**：從 Redis outbox 中移除該訊息（例如使用 `opsForList().remove(outboxKey, 1, messageJson)`）。
+    - 回傳成功結果。
+  - 若 `remainingStock < 0`（庫存已空/超賣）：
+    - 執行補償：`opsForValue().increment(stockKey)` 補回庫存。
+    - 移除無效的 outbox 紀錄：從 outbox 移除剛才塞入的訊息。
+    - 回傳降級結果（銘謝惠顧）。
+  - 若發送 MQ 發生 Exception：捕獲異常並印出 Error Log，但不阻斷流程（回傳成功）。因為訊息已經安全留在 Redis Outbox 中，會由後續的 Scheduler 補發。
 
-## 2. API 文件生成 (OpenAPI 3.0)
-- 所有 Controller 需加上 `@Tag`，所有 API 端點需加上 `@Operation` 說明用途與回傳 HTTP Status (包含 202 異步處理)。
-- Entity / DTO 需加上 `@Schema` 說明欄位用途。
+## 2. 新增 `RedisOutboxScheduler.java` (排程轉發器)
+請在 `com.lottery.system.scheduler` (或相似 package) 下建立一個 Spring `@Component` 與 `@EnableScheduling` 的排程器。
+- **功能**：設定一個 `@Scheduled(fixedDelay = 10000)` (每 10 秒執行一次) 的任務。
+- **邏輯**：
+  1. 使用 `stringRedisTemplate.keys("activity:*:outbox")` 找出所有活動的 Outbox Key。
+  2. 遍歷這些 Key，使用 `opsForList().rightPop(outboxKey)` 取出積壓的訊息（代表 API 層發送 MQ 失敗的孤兒訊息）。
+  3. 將取出的 JSON 訊息反序列化為 `DrawMessage`。
+  4. 重新發送至 RabbitMQ。
+  5. 確保這段邏輯有完整的 `try-catch`，若 MQ 依然連線失敗，需將訊息重新 `leftPush` 放回佇列等待下次重試。
 
-# 資料庫設計 (JPA Entities)
-建立以下 Entity (需繼承 `BaseEntity` 並使用 Lombok)：
-1. `User`: id, username(唯一), password, scope, is_password_changed(預設 false)
-2. `Activity`: id, name, status, max_draws_per_user, start_time, end_time
-3. `Prize`: id, activity_id, name, stock, probability, prize_type(1:實體, 2:虛擬, 3:銘謝惠顧), version(@Version)
-4. `DrawTicket`: ticket_id(String/UUID), activity_id, user_id, status(0:INIT, 1:SUCCESS, 2:FAILED), prize_id
-5. `UserActivityCounter`: id, user_id, activity_id, current_draw_count, version(@Version)
+## 3. 依賴注入調整
+- 請確保 `PhysicalPrizeStrategy` 中有注入 `ObjectMapper` 以處理 JSON 的序列化與反序列化。
 
-# 程式碼設計與 SOLID 原則 (Design Patterns & Clean Code)
-請嚴格遵守單一職責與開閉原則，並套用以下設計模式解耦業務邏輯：
-1. **職責分離 (SRP)**: 拆分出 `DrawValidationService` (校驗次數與頻率)、`DrawAlgorithmService` (亂數機率運算)，由 `DrawAppService` (Facade) 統籌流程。
-2. **策略模式 (Strategy Pattern)**: 針對獎項類型建立 `PrizeProcessStrategy` 介面，並實作 `PhysicalPrizeStrategy` (實體獎需扣庫存與發 MQ)、`VirtualPrizeStrategy` (虛擬獎)、`NonePrizeStrategy` (銘謝惠顧，直接紀錄失敗狀態)。
-3. **工廠模式 (Factory Pattern)**: 實作 `PrizeStrategyFactory`，依據 `prize_type` 動態回傳對應的處理策略。
-
-# 核心架構與業務邏輯實作 (Core Logic)
-
-## 1. 系統初始化 (Data Seeder)
-- 實作 `CommandLineRunner`，若 `User` 表為空則建立預設帳號 (username:`admin`, password:`admin`, scope:`ADMIN`, is_password_changed:`false`)。
-
-## 2. 身份驗證與權限過濾 (Spring Security & JWT)
-- 設定 Stateless Session，開放 `/api/v1/auth/login` 與 Swagger UI 相關路徑。
-- `JwtAuthenticationFilter`: 解析 JWT scope 為 `GrantedAuthority`，並檢查 JWT 是否存在於 Redis 的 Logout Blocklist 中。
-
-## 3. 認證與使用者 API
-- `POST /login`: 驗證並核發 JWT。
-- `POST /logout`: 將當前 JWT 存入 Redis 阻擋名單 (TTL=JWT剩餘時間)。
-- `POST /change-password`: 登入後修改密碼，`is_password_changed` 設為 true。
-- CRUD User API (需 `SCOPE_ADMIN`): 執行前須檢查操作者 `is_password_changed` 是否為 true，否則拋出異常要求先改預設密碼。
-
-## 4. 抽獎 API 與防刷限流
-- `DrawController`: 包含 `POST /api/v1/draws` 與 `GET /api/v1/draws/{ticketId}/result`。
-- **Interceptor**: Redis 限制單一 `user_id` 每分鐘僅能呼叫抽獎 API 3 次。
-
-## 5. 核心抽獎流程 (結合 Design Patterns)
-`DrawAppService` 流程如下：
-- **Step 1**: 呼叫 `DrawValidationService` (利用 Redis INCR) 檢查參與次數。
-- **Step 2**: 呼叫 `DrawAlgorithmService` 產生亂數判定抽中哪個 `Prize`。
-- **Step 3**: 透過 `PrizeStrategyFactory` 取得該獎項的 `PrizeProcessStrategy`。
-- **Step 4**: 呼叫 `strategy.execute()`。若為實體獎，策略內部需執行 `StringRedisTemplate.opsForValue().decrement`，若 `< 0` 觸發降級改判為銘謝惠顧。
-
-## 6. 非同步落地與一致性 (MQ)
-- 若策略執行成功（如搶到實體庫存），發送訊息至 RabbitMQ。
-- Consumer 監聽 MQ，以 `@Transactional` 依序更新 `Prize`(扣真實庫存)、`UserActivityCounter`(加次數)、`DrawTicket`(改狀態為 SUCCESS)。
-- 實作 DLQ 與補償機制，失敗時執行 Redis 庫存 `INCR` 補回。
-
-# 測試要求 (JUnit 5 + Mockito)
-為核心服務撰寫單元測試：
-1. 機率分佈驗證 (`DrawAlgorithmService` 模擬萬次抽獎)。
-2. 邊界與降級驗證 (`PhysicalPrizeStrategy` 模擬 decrement 回傳 -1 時正確回傳未中獎結果)。
+# 預期結果
+完成後，`PhysicalPrizeStrategy` 必須達到「扣庫存」與「記錄待發送訊息」的絕對原子性，徹底消除極端當機造成的資料不一致風險。
