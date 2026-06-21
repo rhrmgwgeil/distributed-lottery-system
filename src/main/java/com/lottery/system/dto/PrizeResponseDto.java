@@ -27,7 +27,7 @@ public class PrizeResponseDto {
     @Schema(description = "Stock count for the prize", example = "100")
     private Integer stock;
 
-    @Schema(description = "Winning probability (0.0000 to 1.0000)", example = "0.0500")
+    @Schema(description = "Winning probability percentage (1 to 100)", example = "5.0000")
     private BigDecimal probability;
 
     @Schema(description = "Type of prize (1: Physical, 2: Virtual, 3: None)", example = "1")

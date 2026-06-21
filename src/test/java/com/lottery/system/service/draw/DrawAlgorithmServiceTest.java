@@ -23,9 +23,9 @@ public class DrawAlgorithmServiceTest {
 
     @Test
     public void testProbabilityDistribution() {
-        Prize physicalPrize = Prize.builder().id(1L).prizeType(1).probability(new BigDecimal("10.00")).name("Physical").build();
-        Prize virtualPrize = Prize.builder().id(2L).prizeType(2).probability(new BigDecimal("20.00")).name("Virtual").build();
-        Prize nonePrize = Prize.builder().id(3L).prizeType(3).probability(new BigDecimal("70.00")).name("None").build();
+        Prize physicalPrize = Prize.builder().id(1L).prizeType(1).probability(new BigDecimal("0.10")).name("Physical").build();
+        Prize virtualPrize = Prize.builder().id(2L).prizeType(2).probability(new BigDecimal("0.20")).name("Virtual").build();
+        Prize nonePrize = Prize.builder().id(3L).prizeType(3).probability(new BigDecimal("0.70")).name("None").build();
 
         List<Prize> prizes = Arrays.asList(physicalPrize, virtualPrize, nonePrize);
 

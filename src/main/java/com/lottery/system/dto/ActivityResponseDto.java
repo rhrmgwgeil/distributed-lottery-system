@@ -5,8 +5,9 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import com.lottery.system.enums.ActiveStatus;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 @Data
 @NoArgsConstructor
@@ -22,14 +23,14 @@ public class ActivityResponseDto {
     private String name;
 
     @Schema(description = "Status of the activity", example = "ACTIVE")
-    private String status;
+    private ActiveStatus status;
 
     @Schema(description = "Maximum draw attempts allowed per user", example = "5")
     private Integer maxDrawsPerUser;
 
     @Schema(description = "Activity start date and time")
-    private LocalDateTime startTime;
+    private OffsetDateTime startTime;
 
     @Schema(description = "Activity end date and time")
-    private LocalDateTime endTime;
+    private OffsetDateTime endTime;
 }

@@ -8,6 +8,7 @@ import com.lottery.system.entity.UserActivityCounter;
 import com.lottery.system.repository.DrawTicketRepository;
 import com.lottery.system.repository.PrizeRepository;
 import com.lottery.system.repository.UserActivityCounterRepository;
+import com.lottery.system.enums.TicketStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
@@ -73,7 +74,7 @@ public class DrawMessageConsumer {
         counterRepository.save(counter);
 
         // Update ticket to SUCCESS
-        ticket.setStatus(1); // 1: SUCCESS
+        ticket.setStatus(TicketStatus.SUCCESS);
         drawTicketRepository.save(ticket);
 
         log.info("Successfully persisted draw result in database for ticket: {}", message.getTicketId());
@@ -89,19 +90,24 @@ public class DrawMessageConsumer {
     public void consumeDlaMessage(DrawMessage message) {
         log.error("Handling dead letter queue compensation for ticket: {}", message.getTicketId());
 
-        // Update ticket status to FAILED in database
+        // Update ticket status to SYSTEM_FAILED in database
         drawTicketRepository.findById(message.getTicketId()).ifPresent(ticket -> {
-            ticket.setStatus(2); // 2: FAILED
+            ticket.setStatus(TicketStatus.SYSTEM_FAILED);
             drawTicketRepository.save(ticket);
         });
 
         // Compensate Redis stock if it's a physical prize
         prizeRepository.findById(message.getPrizeId()).ifPresent(prize -> {
             if (prize.getPrizeType() == 1) {
-                String redisKey = "prize:stock:" + prize.getId();
+                String redisKey = "prize:" + prize.getId() + ":stock";
                 redisTemplate.opsForValue().increment(redisKey);
                 log.info("Compensated Redis stock for physical prize: {} via increment key {}", prize.getId(), redisKey);
             }
         });
+
+        // Compensate Redis user draw count
+        String userDrawKey = "user:draw:count:" + message.getActivityId() + ":" + message.getUserId();
+        redisTemplate.opsForValue().decrement(userDrawKey);
+        log.info("Compensated Redis user draw count for user: {} and activity: {}", message.getUserId(), message.getActivityId());
     }
 }

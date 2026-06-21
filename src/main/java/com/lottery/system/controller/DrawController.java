@@ -10,6 +10,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/draws")
@@ -24,9 +25,9 @@ public class DrawController {
 
     @PostMapping
     @Operation(summary = "Initiate a draw ticket", description = "Performs initial validation, picks a prize, reserves Redis stock, and pushes to MQ. Returns HTTP 202 Accepted for async processing.")
-    public ResponseEntity<DrawTicketDto> performDraw(@Valid @RequestBody DrawRequest request) {
+    public ResponseEntity<List<DrawTicketDto>> performDraw(@Valid @RequestBody DrawRequest request) {
         String username = SecurityContextHolder.getContext().getAuthentication().getName();
-        DrawTicketDto response = drawService.performDraw(username, request);
+        List<DrawTicketDto> response = drawService.performDraw(username, request);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
     }
 

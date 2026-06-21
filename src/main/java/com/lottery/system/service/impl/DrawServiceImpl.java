@@ -11,6 +11,8 @@ import com.lottery.system.service.draw.DrawAppService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class DrawServiceImpl implements DrawService {
@@ -28,12 +30,14 @@ public class DrawServiceImpl implements DrawService {
     }
 
     @Override
-    public DrawTicketDto performDraw(String username, DrawRequest request) {
+    public List<DrawTicketDto> performDraw(String username, DrawRequest request) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
 
-        DrawTicket ticket = drawAppService.performDraw(user.getId(), request.getActivityId());
-        return mapToDto(ticket);
+        List<DrawTicket> tickets = drawAppService.performDraw(user.getId(), request.getActivityId(), request.getCount());
+        return tickets.stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toList());
     }
 
     @Override

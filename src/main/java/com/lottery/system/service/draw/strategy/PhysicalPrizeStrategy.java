@@ -7,6 +7,7 @@ import com.lottery.system.entity.DrawTicket;
 import com.lottery.system.entity.Prize;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.lottery.system.repository.PrizeRepository;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.RedisOperations;
@@ -24,19 +25,29 @@ public class PhysicalPrizeStrategy implements PrizeProcessStrategy {
     private final StringRedisTemplate redisTemplate;
     private final RabbitTemplate rabbitTemplate;
     private final ObjectMapper objectMapper;
+    private final PrizeRepository prizeRepository;
 
     public PhysicalPrizeStrategy(StringRedisTemplate redisTemplate,
                                  RabbitTemplate rabbitTemplate,
-                                 ObjectMapper objectMapper) {
+                                 ObjectMapper objectMapper,
+                                 PrizeRepository prizeRepository) {
         this.redisTemplate = redisTemplate;
         this.rabbitTemplate = rabbitTemplate;
         this.objectMapper = objectMapper;
+        this.prizeRepository = prizeRepository;
     }
 
     @Override
     public boolean execute(DrawTicket ticket, Prize prize) {
         String stockKey = "prize:" + prize.getId() + ":stock";
         String outboxKey = "activity:" + ticket.getActivityId() + ":outbox";
+
+        // Defensive check: if the stock key does not exist in Redis, warm it up from DB (SETNX)
+        if (Boolean.FALSE.equals(redisTemplate.hasKey(stockKey))) {
+            Prize dbPrize = prizeRepository.findById(prize.getId())
+                    .orElseThrow(() -> new IllegalArgumentException("Prize not found: " + prize.getId()));
+            redisTemplate.opsForValue().setIfAbsent(stockKey, String.valueOf(dbPrize.getStock()));
+        }
 
         DrawMessage drawMessage = DrawMessage.builder()
                 .ticketId(ticket.getTicketId())

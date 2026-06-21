@@ -19,7 +19,7 @@ public class DrawAlgorithmService {
             throw new IllegalStateException("No prizes configured for this activity");
         }
 
-        double randomVal = Math.random() * 100.0; // Range [0.0, 100.0)
+        double randomVal = Math.random(); // Range [0.0, 1.0)
         double cumulative = 0.0;
         Prize nonePrize = null;
 

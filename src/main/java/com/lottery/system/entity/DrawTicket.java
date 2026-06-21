@@ -1,5 +1,6 @@
 package com.lottery.system.entity;
 
+import com.lottery.system.enums.TicketStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.persistence.*;
 import lombok.*;
@@ -27,9 +28,10 @@ public class DrawTicket extends BaseEntity {
     @Schema(description = "ID of the participating user", example = "5")
     private Long userId;
 
-    @Column(nullable = false)
-    @Schema(description = "Status of the draw ticket (0: INIT, 1: SUCCESS, 2: FAILED)", example = "0")
-    private Integer status;
+    @Column(nullable = false, length = 20)
+    @Enumerated(EnumType.STRING)
+    @Schema(description = "Status of the draw ticket", example = "INIT")
+    private TicketStatus status;
 
     @Column(name = "prize_id")
     @Schema(description = "ID of the won prize (null if none/pending)", example = "10")

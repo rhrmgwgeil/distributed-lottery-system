@@ -1,5 +1,6 @@
 package com.lottery.system.dto;
 
+import com.lottery.system.enums.TicketStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -22,8 +23,8 @@ public class DrawTicketDto {
     @Schema(description = "ID of the user who performed the draw", example = "5")
     private Long userId;
 
-    @Schema(description = "Status of the draw ticket (0: INIT, 1: SUCCESS, 2: FAILED)", example = "0")
-    private Integer status;
+    @Schema(description = "Status of the draw ticket", example = "INIT")
+    private TicketStatus status;
 
     @Schema(description = "ID of the won prize (null if none or pending)", example = "10")
     private Long prizeId;

@@ -26,9 +26,9 @@ public class PrizeServiceImpl implements PrizeService {
     private final ObjectMapper objectMapper;
 
     public PrizeServiceImpl(PrizeRepository prizeRepository,
-                            UserRepository userRepository,
-                            StringRedisTemplate redisTemplate,
-                            ObjectMapper objectMapper) {
+            UserRepository userRepository,
+            StringRedisTemplate redisTemplate,
+            ObjectMapper objectMapper) {
         this.prizeRepository = prizeRepository;
         this.userRepository = userRepository;
         this.redisTemplate = redisTemplate;
@@ -47,7 +47,7 @@ public class PrizeServiceImpl implements PrizeService {
                 .activityId(request.getActivityId())
                 .name(request.getName())
                 .stock(request.getStock())
-                .probability(request.getProbability())
+                .probability(request.getProbability().divide(new BigDecimal("100"), 4, java.math.RoundingMode.HALF_UP))
                 .prizeType(request.getPrizeType())
                 .build();
 
@@ -73,7 +73,7 @@ public class PrizeServiceImpl implements PrizeService {
         prize.setActivityId(request.getActivityId());
         prize.setName(request.getName());
         prize.setStock(request.getStock());
-        prize.setProbability(request.getProbability());
+        prize.setProbability(request.getProbability().divide(new BigDecimal("100"), 4, java.math.RoundingMode.HALF_UP));
         prize.setPrizeType(request.getPrizeType());
 
         Prize saved = prizeRepository.save(prize);
@@ -86,7 +86,7 @@ public class PrizeServiceImpl implements PrizeService {
 
     private void validateProbabilitySum(Long activityId, BigDecimal newProbability, Long excludePrizeId) {
         List<Prize> existingPrizes = prizeRepository.findByActivityId(activityId);
-        BigDecimal sum = newProbability;
+        BigDecimal sum = newProbability.divide(new BigDecimal("100"), 4, java.math.RoundingMode.HALF_UP);
 
         for (Prize p : existingPrizes) {
             if (excludePrizeId != null && p.getId().equals(excludePrizeId)) {
@@ -95,10 +95,10 @@ public class PrizeServiceImpl implements PrizeService {
             sum = sum.add(p.getProbability());
         }
 
-        if (sum.compareTo(new BigDecimal("100")) > 0) {
+        if (sum.compareTo(java.math.BigDecimal.ONE) > 0) {
             throw new IllegalArgumentException(
-                    "Total probability of prizes for activity " + activityId + " cannot exceed 100. Current sum is " + sum
-            );
+                    "Total probability of prizes for activity " + activityId + " cannot exceed 100%. Current sum is "
+                            + sum.multiply(new BigDecimal("100")) + "%");
         }
     }
 
@@ -109,22 +109,26 @@ public class PrizeServiceImpl implements PrizeService {
             redisTemplate.opsForValue().set(stockKey, String.valueOf(saved.getStock()));
         }
 
-        // 2. Fetch all latest prizes, serialize to JSON, and sync to Redis: activity:{activityId}:prizes
+        // 2. Fetch all latest prizes, serialize to JSON, and sync to Redis:
+        // activity:{activityId}:prizes
         List<Prize> latestPrizes = prizeRepository.findByActivityId(saved.getActivityId());
         String prizesKey = "activity:" + saved.getActivityId() + ":prizes";
         try {
             String prizesJson = objectMapper.writeValueAsString(latestPrizes);
             redisTemplate.opsForValue().set(prizesKey, prizesJson);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to serialize and sync prizes to Redis for activity " + saved.getActivityId(), e);
+            throw new RuntimeException(
+                    "Failed to serialize and sync prizes to Redis for activity " + saved.getActivityId(), e);
         }
     }
 
     private void verifyOperatorPasswordChanged(String operatorUsername) {
         User operator = userRepository.findByUsername(operatorUsername)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Operator user context not found"));
+                .orElseThrow(
+                        () -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Operator user context not found"));
         if (!operator.isPasswordChanged()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Please change your default password first before administrative actions");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Please change your default password first before administrative actions");
         }
     }
 
@@ -134,7 +138,7 @@ public class PrizeServiceImpl implements PrizeService {
                 .activityId(prize.getActivityId())
                 .name(prize.getName())
                 .stock(prize.getStock())
-                .probability(prize.getProbability())
+                .probability(prize.getProbability().multiply(new BigDecimal("100")))
                 .prizeType(prize.getPrizeType())
                 .build();
     }
