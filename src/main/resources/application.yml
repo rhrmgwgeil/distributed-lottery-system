@@ -3,10 +3,16 @@ spring:
     name: distributed-lottery-system
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/lottery
-    username: postgres
-    password: postgres
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:lottery}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      minimum-idle: ${HIKARI_MINIMUM_IDLE:5}
+      maximum-pool-size: ${HIKARI_MAXIMUM_POOL_SIZE:20}
+      idle-timeout: ${HIKARI_IDLE_TIMEOUT:30000}
+      connection-timeout: ${HIKARI_CONNECTION_TIMEOUT:20000}
+      max-lifetime: ${HIKARI_MAX_LIFETIME:1800000}
 
   jpa:
     database-platform: org.hibernate.dialect.PostgreSQLDialect
@@ -19,15 +25,16 @@ spring:
 
   data:
     redis:
-      host: localhost
-      port: 6379
-      database: 0
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      database: ${REDIS_DATABASE:0}
+      password: ${REDIS_PASSWORD:}
 
   rabbitmq:
-    host: localhost
-    port: 5672
-    username: guest
-    password: guest
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
     listener:
       simple:
         retry:
@@ -40,9 +47,9 @@ spring:
 # Custom JWT configuration
 app:
   jwt:
-    secret: dGhpc2lzYW5leHRyZW1lbHlzZWN1cmVzcmluZ2Jvb3Rqd3RzaGFyZWRzZWNyZXRrZXlmb3Jsb3R0ZXJ5c3lzdGVt
-    expiration-ms: 3600000 # 1 hour
+    secret: ${JWT_SECRET:dGhpc2lzYW5leHRyZW1lbHlzZWN1cmVzcmluZ2Jvb3Rqd3RzaGFyZWRzZWNyZXRrZXlmb3Jsb3R0ZXJ5c3lzdGVt}
+    expiration-ms: ${JWT_EXPIRATION_MS:3600000} # 1 hour
     logout-prefix: "logout:"
     rate-limit:
-      limit: 3
-      duration-seconds: 60
+      limit: ${RATE_LIMIT_LIMIT:3}
+      duration-seconds: ${RATE_LIMIT_DURATION:60}
