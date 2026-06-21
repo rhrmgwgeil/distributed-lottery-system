@@ -1,0 +1,46 @@
+title Distributed Lottery System - Draw Happy Path (Won vs Not Won)
+
+participant Client
+participant Controller
+participant DrawAppService
+participant Redis
+participant PostgreSQL
+participant RabbitMQ
+
+Client->Controller: POST /api/v1/draws (activityId, count)
+activate Controller
+Controller->DrawAppService: performDraw(userId, activityId, count)
+activate DrawAppService
+
+DrawAppService->Redis: INCRBY user:draw:count:<actId>:<userId> (count)
+Redis-->DrawAppService: currentCount
+note over DrawAppService: Validation passes if currentCount <= limit
+
+loop i = 1 to count
+    note over DrawAppService: Run probability picker (pickPrize)
+    DrawAppService->PostgreSQL: Save DrawTicket (status: INIT, candidatePrizeId)
+    
+    alt Case A: Won Prize (With Stock)
+        DrawAppService->Redis: MULTI\nDECR prize:<id>:stock\nLPUSH activity:<id>:outbox\nEXEC
+        Redis-->DrawAppService: [remainingStock, outboxLength]
+        
+        note over DrawAppService: If remainingStock >= 0 (Stock reserved)
+        DrawAppService->RabbitMQ: Publish DrawMessage to lottery.draw.queue
+        DrawAppService->Redis: LREM activity:<id>:outbox (1, msg)
+        
+    else Case B: Hit "Thanks" (None) Prize OR Physical Stock Depleted
+        alt Hit Physical Prize but Redis Stock is depleted
+            DrawAppService->Redis: MULTI\nDECR prize:<id>:stock\nLPUSH activity:<id>:outbox\nEXEC
+            Redis-->DrawAppService: [remainingStock (negative), outboxLength]
+            DrawAppService->Redis: INCR prize:<id>:stock (Compensation)
+            DrawAppService->Redis: LREM activity:<id>:outbox (1, msg)
+        end
+        note over DrawAppService: Downgrade and mark ticket as NO_PRIZE
+        DrawAppService->PostgreSQL: Update DrawTicket (status: NO_PRIZE, nonePrizeId)
+    end
+end
+
+DrawAppService-->Controller: List<DrawTicketDto>
+deactivate DrawAppService
+Controller-->Client: HTTP 202 Accepted (List<DrawTicketDto>)
+deactivate Controller
