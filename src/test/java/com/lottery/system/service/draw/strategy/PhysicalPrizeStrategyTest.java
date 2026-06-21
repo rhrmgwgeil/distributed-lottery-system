@@ -155,4 +155,40 @@ public class PhysicalPrizeStrategyTest {
                 // Verify setIfAbsent was executed with DB stock
                 verify(valueOperations, times(1)).setIfAbsent("prize:100:stock", "5");
         }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        public void testExecute_MqPublishFailure_RetainsInOutbox() {
+                DrawTicket ticket = DrawTicket.builder()
+                                .ticketId("ticket-4")
+                                .userId(1L)
+                                .activityId(10L)
+                                .build();
+                Prize prize = Prize.builder()
+                                .id(100L)
+                                .prizeType(1)
+                                .stock(10)
+                                .build();
+
+                // Mock Redis check: key is present in Redis
+                when(redisTemplate.hasKey("prize:100:stock")).thenReturn(true);
+
+                // Mock Redis transaction execution returning remaining stock 9
+                when(redisTemplate.execute(any(SessionCallback.class))).thenReturn(Arrays.asList(9L));
+
+                // Mock rabbitTemplate to throw AmqpException (mocking MQ disconnect)
+                doThrow(new org.springframework.amqp.AmqpException("Connection refused"))
+                                .when(rabbitTemplate).convertAndSend(anyString(), anyString(), any(Object.class));
+
+                boolean result = physicalPrizeStrategy.execute(ticket, prize);
+
+                // 1. Assert: Method still returns true (success) despite MQ exception
+                assertTrue(result);
+
+                // 2. Verify: rabbitTemplate was called
+                verify(rabbitTemplate, times(1)).convertAndSend(anyString(), anyString(), any(Object.class));
+
+                // 3. Verify: opsForList().remove() was NEVER called (message remains in Redis outbox)
+                verify(listOperations, never()).remove(anyString(), anyLong(), anyString());
+        }
 }

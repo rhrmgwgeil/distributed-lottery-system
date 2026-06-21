@@ -45,7 +45,9 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         }
 
         if (count != null && count > 3) {
-            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Too many requests. Limit is 3 draws per minute.");
+            response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+            response.getWriter().write("Too many requests. Limit is 3 draws per minute.");
+            return false;
         }
 
         return true;

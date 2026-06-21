@@ -2,6 +2,7 @@ package com.lottery.system.service.draw;
 
 import com.lottery.system.entity.Activity;
 import com.lottery.system.enums.ActiveStatus;
+import com.lottery.system.exception.BusinessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -55,7 +56,7 @@ public class DrawValidationService {
         if (count != null && count > maxDrawsLimit) {
             // Roll back the counter increment
             redisTemplate.opsForValue().decrement(redisKey, drawCount);
-            throw new IllegalStateException("User has exceeded the maximum draws allowed for this activity");
+            throw new BusinessException("Reach rate limit!");
         }
     }
 

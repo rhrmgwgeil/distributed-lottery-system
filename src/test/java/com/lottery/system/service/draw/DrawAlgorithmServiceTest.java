@@ -44,6 +44,13 @@ public class DrawAlgorithmServiceTest {
         double virtualRate = (double) counts.get(2L) / simulations;
         double noneRate = (double) counts.get(3L) / simulations;
 
+        // Print results to console for verification
+        System.out.println("=== Probability Distribution Simulation Results (N=" + simulations + ") ===");
+        System.out.println(String.format("Physical Prize Rate : %.4f (Expected: 0.1000, Diff: %.4f)", physicalRate, (physicalRate - 0.10)));
+        System.out.println(String.format("Virtual Prize Rate  : %.4f (Expected: 0.2000, Diff: %.4f)", virtualRate, (virtualRate - 0.20)));
+        System.out.println(String.format("None/Thanks Rate    : %.4f (Expected: 0.7000, Diff: %.4f)", noneRate, (noneRate - 0.70)));
+        System.out.println("=======================================================================");
+
         // Verify with a margin of error (e.g. +/- 2.5%)
         double margin = 0.025;
         assertTrue(Math.abs(physicalRate - 0.10) < margin, "Physical rate " + physicalRate + " is out of bounds");
